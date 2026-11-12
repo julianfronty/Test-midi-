@@ -12,6 +12,8 @@ button{font:inherit;border-radius:999px;padding:10px 18px;border:1px solid #9a6b
 button:disabled{opacity:.45}
 .last{font-size:2rem;font-weight:600;min-height:2.4rem}
 .ok{color:#2e7d4f}.bad{color:#b03a2e}
+.ped{display:inline-block;padding:6px 16px;border-radius:999px;border:2px solid #cfc6b4;color:#8a8372;font-weight:600}
+.ped.on{background:#9a6b1f;border-color:#9a6b1f;color:#fff}
 textarea{width:100%;min-height:140px;box-sizing:border-box;font:13px monospace}
 </style>
 </head>
@@ -22,6 +24,7 @@ textarea{width:100%;min-height:140px;box-sizing:border-box;font:13px monospace}
 <button id="connect">Connecter le piano</button>
 <p id="conn">Pas encore connecté.</p>
 <div class="last" id="last">–</div>
+<div>Pédale : <span class="ped" id="ped">relâchée</span></div>
 </div>
 <div class="card">
 <div><button id="rec" disabled>Enregistrer</button> <button id="stop" disabled>Arrêter</button></div>
@@ -33,18 +36,25 @@ textarea{width:100%;min-height:140px;box-sizing:border-box;font:13px monospace}
 <script>
 const $=id=>document.getElementById(id);
 const N=['Do','Do#','Ré','Ré#','Mi','Fa','Fa#','Sol','Sol#','La','La#','Si'];
-let t0=0,rec=false,ev=[],pend=new Map();
-function msg(e){const[s,n,v]=e.data,c=s&0xf0,now=performance.now();
-if(c===0x90&&v>0){$('last').textContent=N[n%12]+(Math.floor(n/12)-1);if(rec)pend.set(n,{n,v,s:now-t0});}
-else if(c===0x80||(c===0x90&&v===0)){const p=pend.get(n);if(p&&rec){ev.push({note:n,velocity:p.v,start:Math.round(p.s),end:Math.round(now-t0)});pend.delete(n);}}}
+let t0=0,rec=false,ev=[],pend=new Map(),pedal=[],pedDown=false,pedStart=null;
+function setPed(d){pedDown=d;$('ped').textContent=d?'enfoncée':'relâchée';$('ped').className='ped'+(d?' on':'');}
+function msg(e){const[s,a,b]=e.data,c=s&0xf0,now=performance.now();
+if(c===0xB0&&a===64){const d=b>=64;setPed(d);
+ if(rec){if(d&&pedStart===null)pedStart=Math.round(now-t0);
+ else if(!d&&pedStart!==null){pedal.push({start:pedStart,end:Math.round(now-t0)});pedStart=null;}}return;}
+if(c===0x90&&b>0){$('last').textContent=N[a%12]+(Math.floor(a/12)-1);if(rec)pend.set(a,{n:a,v:b,s:now-t0});}
+else if(c===0x80||(c===0x90&&b===0)){const p=pend.get(a);if(p&&rec){ev.push({note:a,velocity:p.v,start:Math.round(p.s),end:Math.round(now-t0)});pend.delete(a);}}}
 function attach(a){const l=[...a.inputs.values()];l.forEach(i=>i.onmidimessage=msg);
 if(!l.length){$('conn').textContent='Aucun appareil MIDI trouvé. Rebranche le piano.';$('conn').className='bad';return;}
 $('conn').textContent='Piano connecté : '+l.map(i=>i.name).join(', ');$('conn').className='ok';$('rec').disabled=false;}
 $('connect').onclick=async()=>{if(!navigator.requestMIDIAccess){$('conn').textContent='Ce navigateur ne lit pas le MIDI.';$('conn').className='bad';return;}
 try{const a=await navigator.requestMIDIAccess();attach(a);a.onstatechange=()=>attach(a);}
 catch(err){$('conn').textContent='Accès au MIDI refusé ('+err.name+').';$('conn').className='bad';}};
-$('rec').onclick=()=>{rec=true;ev=[];pend=new Map();t0=performance.now();$('rec').disabled=true;$('stop').disabled=false;$('count').textContent='Enregistrement…';};
-$('stop').onclick=()=>{rec=false;$('stop').disabled=true;$('rec').disabled=false;$('count').textContent=ev.length+' note(s) enregistrée(s).';$('out').value=JSON.stringify({notes:ev});$('copy').disabled=!ev.length;};
+$('rec').onclick=()=>{rec=true;ev=[];pedal=[];pend=new Map();t0=performance.now();pedStart=pedDown?0:null;$('rec').disabled=true;$('stop').disabled=false;$('count').textContent='Enregistrement…';};
+$('stop').onclick=()=>{const now=Math.round(performance.now()-t0);if(pedStart!==null){pedal.push({start:pedStart,end:now});pedStart=null;}
+rec=false;$('stop').disabled=true;$('rec').disabled=false;
+$('count').textContent=ev.length+' note(s), '+pedal.length+' appui(s) de pédale.';
+$('out').value=JSON.stringify({notes:ev,pedal:pedal});$('copy').disabled=!ev.length;};
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('out').value);$('copy').textContent='Copié';}catch{$('out').select();}};
 </script>
 </body>

@@ -14,6 +14,8 @@ button:disabled{opacity:.45}
 .ok{color:#2e7d4f}.bad{color:#b03a2e}
 .ped{display:inline-block;padding:6px 16px;border-radius:999px;border:2px solid #cfc6b4;color:#8a8372;font-weight:600}
 .ped.on{background:#9a6b1f;border-color:#9a6b1f;color:#fff}
+audio{width:100%}
+.note{font-size:.9rem;color:#6d6759}
 textarea{width:100%;min-height:140px;box-sizing:border-box;font:13px monospace}
 </style>
 </head>
@@ -27,7 +29,11 @@ textarea{width:100%;min-height:140px;box-sizing:border-box;font:13px monospace}
 <div>Pédale : <span class="ped" id="ped">relâchée</span></div>
 </div>
 <div class="card">
+<label><input type="checkbox" id="withAudio" checked> Enregistrer aussi le son (micro ou entrée audio)</label>
 <div><button id="rec" disabled>Enregistrer</button> <button id="stop" disabled>Arrêter</button></div>
+<p class="note" id="aud">Son : pas encore prêt.</p>
+<audio id="play" controls hidden></audio>
+<a id="dl" hidden download="enregistrement-son.webm">Télécharger le son</a>
 <p id="count">0 note enregistrée.</p>
 <textarea id="out" readonly></textarea>
 <button id="copy" disabled>Copier</button>
@@ -47,14 +53,18 @@ else if(c===0x80||(c===0x90&&b===0)){const p=pend.get(a);if(p&&rec){ev.push({not
 function attach(a){const l=[...a.inputs.values()];l.forEach(i=>i.onmidimessage=msg);
 if(!l.length){$('conn').textContent='Aucun appareil MIDI trouvé. Rebranche le piano.';$('conn').className='bad';return;}
 $('conn').textContent='Piano connecté : '+l.map(i=>i.name).join(', ');$('conn').className='ok';$('rec').disabled=false;}
-$('connect').onclick=async()=>{if(!navigator.requestMIDIAccess){$('conn').textContent='Ce navigateur ne lit pas le MIDI.';$('conn').className='bad';return;}
+let mr=null,chunks=[],stream=null,audT0=0,audioBlob=null;
+async function prepAudio(){if(stream)return true;try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});$('aud').textContent='Son : prêt à enregistrer.';return true;}
+catch(err){$('aud').textContent='Son indisponible ('+err.name+'). Les notes seront quand même enregistrées.';$('aud').className='note bad';return false;}}
+$('connect').onclick=async()=>{await prepAudio();if(!navigator.requestMIDIAccess){$('conn').textContent='Ce navigateur ne lit pas le MIDI.';$('conn').className='bad';return;}
 try{const a=await navigator.requestMIDIAccess();attach(a);a.onstatechange=()=>attach(a);}
 catch(err){$('conn').textContent='Accès au MIDI refusé ('+err.name+').';$('conn').className='bad';}};
-$('rec').onclick=()=>{rec=true;ev=[];pedal=[];pend=new Map();t0=performance.now();pedStart=pedDown?0:null;$('rec').disabled=true;$('stop').disabled=false;$('count').textContent='Enregistrement…';};
-$('stop').onclick=()=>{const now=Math.round(performance.now()-t0);if(pedStart!==null){pedal.push({start:pedStart,end:now});pedStart=null;}
+$('rec').onclick=()=>{if($('withAudio').checked&&stream&&window.MediaRecorder){chunks=[];audioBlob=null;const type=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'';mr=new MediaRecorder(stream,type?{mimeType:type}:undefined);mr.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};mr.onstop=()=>{audioBlob=new Blob(chunks,{type:mr.mimeType||'audio/webm'});const u=URL.createObjectURL(audioBlob);$('play').src=u;$('play').hidden=false;$('dl').href=u;$('dl').hidden=false;$('aud').textContent='Son enregistré : '+Math.round(audioBlob.size/1024)+' Ko.';};audT0=performance.now();mr.start(250);}
+rec=true;ev=[];pedal=[];pend=new Map();t0=performance.now();pedStart=pedDown?0:null;$('rec').disabled=true;$('stop').disabled=false;$('count').textContent='Enregistrement…';};
+$('stop').onclick=()=>{const now=Math.round(performance.now()-t0);if(mr&&mr.state!=='inactive')mr.stop();if(pedStart!==null){pedal.push({start:pedStart,end:now});pedStart=null;}
 rec=false;$('stop').disabled=true;$('rec').disabled=false;
 $('count').textContent=ev.length+' note(s), '+pedal.length+' appui(s) de pédale.';
-$('out').value=JSON.stringify({notes:ev,pedal:pedal});$('copy').disabled=!ev.length;};
+$('out').value=JSON.stringify({notes:ev,pedal:pedal,audioOffsetMs:Math.round(audT0-t0)});$('copy').disabled=!ev.length;};
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('out').value);$('copy').textContent='Copié';}catch{$('out').select();}};
 </script>
 </body>

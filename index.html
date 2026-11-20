@@ -58,14 +58,24 @@ function attach(a){const l=[...a.inputs.values()];l.forEach(i=>i.onmidimessage=m
 if(!l.length){$('conn').textContent='Aucun appareil MIDI trouvé. Rebranche le piano.';$('conn').className='bad';return;}
 $('conn').textContent='Piano connecté : '+l.map(i=>i.name).join(', ');$('conn').className='ok';$('rec').disabled=false;}
 let mr=null,chunks=[],stream=null,audT0=0,audioBlob=null,shareFile=null;
+function toWav(buf){const ch=buf.numberOfChannels,sr=buf.sampleRate,n=buf.length,mix=new Float32Array(n);
+for(let c=0;c<ch;c++){const d=buf.getChannelData(c);for(let i=0;i<n;i++)mix[i]+=d[i]/ch;}
+const v=new DataView(new ArrayBuffer(44+n*2)),w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
+for(let i=0;i<n;i++){const s=Math.max(-1,Math.min(1,mix[i]));v.setInt16(44+i*2,s<0?s*0x8000:s*0x7fff,true);}
+return new Blob([v],{type:'audio/wav'});}
+async function wavFile(b){const ac=new AudioContext();try{const buf=await ac.decodeAudioData(await b.arrayBuffer());return new File([toWav(buf)],'enregistrement-son.wav',{type:'audio/wav'});}finally{ac.close();}}
 async function prepAudio(){if(stream)return true;try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});$('aud').textContent='Son : prêt à enregistrer.';return true;}
 catch(err){$('aud').textContent='Son indisponible ('+err.name+'). Les notes seront quand même enregistrées.';$('aud').className='note bad';return false;}}
 $('connect').onclick=async()=>{await prepAudio();if(!navigator.requestMIDIAccess){$('conn').textContent='Ce navigateur ne lit pas le MIDI.';$('conn').className='bad';return;}
 try{const a=await navigator.requestMIDIAccess();attach(a);a.onstatechange=()=>attach(a);}
 catch(err){$('conn').textContent='Accès au MIDI refusé ('+err.name+').';$('conn').className='bad';}};
 $('rec').onclick=()=>{if($('withAudio').checked&&stream&&window.MediaRecorder){chunks=[];audioBlob=null;const type=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'';mr=new MediaRecorder(stream,type?{mimeType:type}:undefined);mr.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};mr.onstop=()=>{audioBlob=new Blob(chunks,{type:mr.mimeType||'audio/webm'});const u=URL.createObjectURL(audioBlob);$('play').src=u;$('play').hidden=false;$('dl').href=u;$('dl').hidden=false;$('aud').textContent='Son enregistré : '+Math.round(audioBlob.size/1024)+' Ko.';
- const f=new File([audioBlob],'enregistrement-son.webm',{type:audioBlob.type});$('files').hidden=false;
- const canShare=navigator.canShare&&navigator.canShare({files:[f]});$('share').hidden=!canShare;shareFile=f;};audT0=performance.now();mr.start(250);}
+ $('files').hidden=false;
+ const showShare=f=>{const ok=navigator.canShare&&navigator.canShare({files:[f]});$('share').hidden=!ok;shareFile=f;};
+ showShare(new File([audioBlob],'enregistrement-son.webm',{type:audioBlob.type}));
+ wavFile(audioBlob).then(f=>showShare(f)).catch(()=>{});};audT0=performance.now();mr.start(250);}
 rec=true;ev=[];pedal=[];pend=new Map();t0=performance.now();pedStart=pedDown?0:null;$('rec').disabled=true;$('stop').disabled=false;$('count').textContent='Enregistrement…';};
 $('stop').onclick=()=>{const now=Math.round(performance.now()-t0);if(mr&&mr.state!=='inactive')mr.stop();if(pedStart!==null){pedal.push({start:pedStart,end:now});pedStart=null;}
 rec=false;$('stop').disabled=true;$('rec').disabled=false;
